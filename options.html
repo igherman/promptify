@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Promptify Options</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #333;
+      background-color: #f8f9fa;
+      padding: 20px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 8px;
+      padding: 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #1a73e8;
+      margin-bottom: 8px;
+    }
+    
+    .subtitle {
+      color: #5f6368;
+      margin-bottom: 24px;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    label {
+      display: block;
+      font-weight: 500;
+      color: #3c4043;
+      margin-bottom: 6px;
+    }
+    
+    .help-text {
+      font-size: 12px;
+      color: #5f6368;
+      margin-top: 4px;
+    }
+    
+    input[type="text"], input[type="url"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    
+    input:focus {
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.1);
+    }
+    
+    .button-group {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 24px;
+    }
+    
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 40px;
+    }
+    
+    .primary-btn {
+      background-color: #1a73e8;
+      color: white;
+    }
+    
+    .primary-btn:hover:not(:disabled) {
+      background-color: #1557b0;
+    }
+    
+    .secondary-btn {
+      background-color: #f8f9fa;
+      color: #3c4043;
+      border: 1px solid #dadce0;
+    }
+    
+    .secondary-btn:hover:not(:disabled) {
+      background-color: #f1f3f4;
+    }
+    
+    button:disabled {
+      background-color: #f8f9fa;
+      color: #9aa0a6;
+      cursor: not-allowed;
+    }
+    
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid transparent;
+      border-top: 2px solid currentColor;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .status-message {
+      padding: 12px;
+      border-radius: 4px;
+      margin-top: 16px;
+      font-size: 14px;
+    }
+    
+    .status-success {
+      background-color: #e6f4ea;
+      color: #137333;
+      border: 1px solid #34a853;
+    }
+    
+    .status-error {
+      background-color: #fce8e6;
+      color: #d93025;
+      border: 1px solid #ea4335;
+    }
+    
+    .status-info {
+      background-color: #e8f0fe;
+      color: #1a73e8;
+      border: 1px solid #4285f4;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+    
+    .connection-section {
+      border-top: 1px solid #e8eaed;
+      padding-top: 20px;
+      margin-top: 20px;
+    }
+    
+    .connection-section h3 {
+      font-size: 16px;
+      font-weight: 500;
+      color: #3c4043;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Promptify Options</h1>
+    <p class="subtitle">Configure your Ollama connection settings</p>
+    
+    <form id="optionsForm">
+      <div class="form-group">
+        <label for="hostInput">Ollama Host URL:</label>
+        <input type="url" id="hostInput" placeholder="http://127.0.0.1:11434">
+        <div class="help-text">The URL where your Ollama server is running</div>
+      </div>
+      
+      <div class="form-group">
+        <label for="defaultModelInput">Default Model:</label>
+        <input type="text" id="defaultModelInput" placeholder="llama3.2">
+        <div class="help-text">The default model to use for new conversations</div>
+      </div>
+      
+      <div class="button-group">
+        <button type="submit" class="primary-btn" id="saveBtn">
+          <span class="btn-text">Save Settings</span>
+          <span class="spinner hidden"></span>
+        </button>
+      </div>
+    </form>
+    
+    <div class="connection-section">
+      <h3>Connection Test</h3>
+      <button type="button" class="secondary-btn" id="testBtn">
+        <span class="btn-text">Test Connection</span>
+        <span class="spinner hidden"></span>
+      </button>
+      
+      <div id="statusMessage" class="status-message hidden"></div>
+    </div>
+  </div>
+  
+  <script src="options.js"></script>
+</body>
+</html>
