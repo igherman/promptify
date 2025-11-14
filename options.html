@@ -163,6 +163,52 @@
       display: none !important;
     }
     
+    .provider-config {
+      margin-left: 0;
+      margin-top: 16px;
+    }
+    
+    select.form-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+      background-color: white;
+      cursor: pointer;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    
+    select.form-input:focus {
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.1);
+    }
+    
+    input[type="password"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    
+    input[type="password"]:focus {
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.1);
+    }
+    
+    .form-help {
+      font-size: 12px;
+      color: #5f6368;
+      margin-top: 4px;
+      display: block;
+    }
+    
     .connection-section {
       border-top: 1px solid #e8eaed;
       padding-top: 20px;
@@ -180,19 +226,80 @@
 <body>
   <div class="container">
     <h1>Promptify Options</h1>
-    <p class="subtitle">Configure your Ollama connection settings</p>
+    <p class="subtitle">Configure your LLM provider and API settings</p>
     
-    <form id="optionsForm">
+        <form id="optionsForm" class="options-form">
       <div class="form-group">
-        <label for="hostInput">Ollama Host URL:</label>
-        <input type="url" id="hostInput" placeholder="http://127.0.0.1:11434">
-        <div class="help-text">The URL where your Ollama server is running</div>
+        <label for="providerSelect">LLM Provider</label>
+        <select id="providerSelect" class="form-input">
+          <option value="ollama">Ollama (Local)</option>
+          <option value="openai">OpenAI</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
+        <span class="form-help">Choose your LLM provider</span>
       </div>
-      
-      <div class="form-group">
-        <label for="defaultModelInput">Default Model:</label>
-        <input type="text" id="defaultModelInput" placeholder="llama3.2">
-        <div class="help-text">The default model to use for new conversations</div>
+
+      <!-- Ollama Configuration (shown when provider is ollama) -->
+      <div id="ollamaConfig" class="provider-config">
+        <div class="form-group">
+          <label for="hostInput">Ollama Host URL</label>
+          <input
+            type="text"
+            id="hostInput"
+            placeholder="http://127.0.0.1:11434"
+            class="form-input"
+          />
+          <span class="form-help">The URL where your Ollama instance is running</span>
+        </div>
+
+        <div class="form-group">
+          <label for="defaultModelInput">Default Model</label>
+          <input
+            type="text"
+            id="defaultModelInput"
+            placeholder="llama3.1"
+            class="form-input"
+          />
+          <span class="form-help">The default model to use for prompt generation</span>
+        </div>
+      </div>
+
+      <!-- API Key Configuration (shown for cloud providers) -->
+      <div id="apiKeyConfig" class="provider-config" style="display: none;">
+        <div class="form-group">
+          <label for="apiKeyInput">API Key</label>
+          <input
+            type="password"
+            id="apiKeyInput"
+            placeholder="sk-..."
+            class="form-input"
+          />
+          <span class="form-help">Your API key for the selected provider</span>
+        </div>
+
+        <div class="form-group">
+          <label for="apiModelInput">Model Name</label>
+          <input
+            type="text"
+            id="apiModelInput"
+            placeholder="gpt-4"
+            class="form-input"
+          />
+          <span class="form-help">The model to use (e.g., gpt-4, claude-3-opus-20240229)</span>
+        </div>
+
+        <!-- Optional: Base URL for custom endpoints -->
+        <div class="form-group">
+          <label for="apiBaseUrlInput">Base URL (Optional)</label>
+          <input
+            type="text"
+            id="apiBaseUrlInput"
+            placeholder="https://api.openai.com/v1"
+            class="form-input"
+          />
+          <span class="form-help">Custom API endpoint (leave empty for default)</span>
+        </div>
       </div>
       
       <div class="button-group">

@@ -35,14 +35,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[Background] Processing OLLAMA_QUERY');
     startKeepAlive(); // Prevent service worker from sleeping
     
-    handleOllamaQuery(message.payload)
+    handleLLMQuery(message.payload)
       .then(response => {
-        console.log('[Background] Ollama query successful:', response);
+        console.log('[Background] LLM query successful:', response);
         sendResponse(response);
         stopKeepAlive();
       })
       .catch(error => {
-        console.error('[Background] Ollama query failed:', error);
+        console.error('[Background] LLM query failed:', error);
         sendResponse({ ok: false, error: error.message });
         stopKeepAlive();
       });
@@ -59,6 +59,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch(error => {
         console.error('Ollama test failed:', error);
+        sendResponse({ ok: false, error: error.message });
+      });
+    
+    // Return true to indicate we will send a response asynchronously
+    return true;
+  }
+  
+  if (message.type === 'API_TEST') {
+    handleAPITest(message.payload)
+      .then(response => {
+        console.log('API test successful:', response);
+        sendResponse(response);
+      })
+      .catch(error => {
+        console.error('API test failed:', error);
         sendResponse({ ok: false, error: error.message });
       });
     
@@ -83,6 +98,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Create enhanced prompt for prompt engineering
+function createEnhancedPrompt(prompt) {
+  return 'Act as a professional prompt engineer. Improve the following user prompt for use with an AI language model:\n"' + prompt
+    + '".\nReturn an enhanced prompt, without any additional commentary. Structure the prompt to get the best possible results.';
+}
+
+// Handle LLM query - routes to appropriate provider
+async function handleLLMQuery(payload) {
+  const { prompt, model, host } = payload;
+  
+  // Get settings to determine provider
+  const storage = chrome.storage.sync || chrome.storage.local;
+  const settings = await storage.get([
+    'llmProvider',
+    'ollamaHost',
+    'defaultModel',
+    'apiKey',
+    'apiModel',
+    'apiBaseUrl'
+  ]);
+  
+  const provider = settings.llmProvider || 'ollama';
+  
+  console.log(`[Background] Using provider: ${provider}`);
+  
+  if (provider === 'ollama') {
+    return handleOllamaQuery({
+      prompt,
+      model: model || settings.defaultModel,
+      host: host || settings.ollamaHost
+    });
+  } else {
+    return handleCloudAPIQuery({
+      prompt,
+      provider,
+      apiKey: settings.apiKey,
+      apiModel: settings.apiModel,
+      apiBaseUrl: settings.apiBaseUrl
+    });
+  }
+}
+
 // Handle Ollama API query
 async function handleOllamaQuery(payload) {
   const { prompt, model, host } = payload;
@@ -97,8 +154,7 @@ async function handleOllamaQuery(payload) {
   
   console.log(`Making Ollama API request to: ${apiUrl}`);
   
-  const enhancedPrompt =  'Act as a professional prompt engineer. Improve the following user prompt for use with an AI language model:\n"' + prompt
-   + '".\nReturn an enhanced prompt, without any additional commentary. Structure the prompt to get the best possible results.';
+  const enhancedPrompt = createEnhancedPrompt(prompt);
   console.log('Request payload:', { model, enhancedPrompt });
 
   try {
@@ -155,6 +211,148 @@ async function handleOllamaQuery(payload) {
   }
 }
 
+// Handle Cloud API query (OpenAI, Anthropic, etc.)
+async function handleCloudAPIQuery(payload) {
+  const { prompt, provider, apiKey, apiModel, apiBaseUrl } = payload;
+  
+  // Validate required fields
+  if (!prompt || !apiKey || !apiModel) {
+    throw new Error('Missing required fields: prompt, apiKey, and apiModel are required');
+  }
+  
+  const enhancedPrompt = createEnhancedPrompt(prompt);
+  
+  console.log(`Making ${provider} API request`);
+  
+  try {
+    if (provider === 'openai' || provider === 'openrouter') {
+      return await handleOpenAICompatibleAPI({
+        prompt: enhancedPrompt,
+        apiKey,
+        apiModel,
+        apiBaseUrl: apiBaseUrl || (provider === 'openai' ? 'https://api.openai.com/v1' : 'https://openrouter.ai/api/v1')
+      });
+    } else if (provider === 'anthropic') {
+      return await handleAnthropicAPI({
+        prompt: enhancedPrompt,
+        apiKey,
+        apiModel,
+        apiBaseUrl: apiBaseUrl || 'https://api.anthropic.com/v1'
+      });
+    } else {
+      throw new Error(`Unsupported provider: ${provider}`);
+    }
+  } catch (error) {
+    console.error(`${provider} API error:`, error);
+    throw error;
+  }
+}
+
+// Handle OpenAI-compatible API
+async function handleOpenAICompatibleAPI({ prompt, apiKey, apiModel, apiBaseUrl }) {
+  const apiUrl = `${apiBaseUrl}/chat/completions`;
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+  
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: apiModel,
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.7
+      })
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`API error (${response.status}): ${errorData.error?.message || response.statusText}`);
+    }
+    
+    const data = await response.json();
+    const responseText = data.choices?.[0]?.message?.content || 'No response text available';
+    
+    return {
+      ok: true,
+      text: responseText
+    };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    
+    if (error.name === 'AbortError') {
+      throw new Error('Request timed out after 2 minutes');
+    }
+    
+    throw error;
+  }
+}
+
+// Handle Anthropic API
+async function handleAnthropicAPI({ prompt, apiKey, apiModel, apiBaseUrl }) {
+  const apiUrl = `${apiBaseUrl}/messages`;
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+  
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: apiModel,
+        max_tokens: 4096,
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      })
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`API error (${response.status}): ${errorData.error?.message || response.statusText}`);
+    }
+    
+    const data = await response.json();
+    const responseText = data.content?.[0]?.text || 'No response text available';
+    
+    return {
+      ok: true,
+      text: responseText
+    };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    
+    if (error.name === 'AbortError') {
+      throw new Error('Request timed out after 2 minutes');
+    }
+    
+    throw error;
+  }
+}
+
 // Handle Ollama connection test
 async function handleOllamaTest(payload) {
   const { host } = payload;
@@ -197,6 +395,72 @@ async function handleOllamaTest(payload) {
     }
     
     throw new Error(`Connection test failed: ${error.message}`);
+  }
+}
+
+// Handle API connection test for cloud providers
+async function handleAPITest(payload) {
+  const { provider, apiKey, apiModel, apiBaseUrl } = payload;
+  
+  console.log(`Testing ${provider} API connection`);
+  
+  try {
+    if (provider === 'openai' || provider === 'openrouter') {
+      const baseUrl = apiBaseUrl || (provider === 'openai' ? 'https://api.openai.com/v1' : 'https://openrouter.ai/api/v1');
+      const testUrl = `${baseUrl}/models`;
+      
+      const response = await fetch(testUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`API error (${response.status}): ${errorData.error?.message || response.statusText}`);
+      }
+      
+      return { ok: true };
+      
+    } else if (provider === 'anthropic') {
+      // Anthropic doesn't have a simple test endpoint, so we make a minimal request
+      const baseUrl = apiBaseUrl || 'https://api.anthropic.com/v1';
+      const testUrl = `${baseUrl}/messages`;
+      
+      const response = await fetch(testUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: apiModel,
+          max_tokens: 1,
+          messages: [
+            {
+              role: 'user',
+              content: 'test'
+            }
+          ]
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`API error (${response.status}): ${errorData.error?.message || response.statusText}`);
+      }
+      
+      return { ok: true };
+      
+    } else {
+      throw new Error(`Unsupported provider: ${provider}`);
+    }
+    
+  } catch (error) {
+    console.error(`${provider} API test failed:`, error);
+    throw error;
   }
 }
 
