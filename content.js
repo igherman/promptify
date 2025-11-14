@@ -1,35 +1,95 @@
 /**
  * Content script that shows floating Promptify button and handles text insertion
+ * Optimized to avoid triggering Chrome's internal Aura system errors
  */
 
-console.log('[CONTENT] Promptify content script loaded on:', window.location.hostname);
-
-let floatingButton = null;
-let currentTextInput = null;
-let lastFocusedInput = null;
-
-// Listen for focus on text inputs
-document.addEventListener('focusin', (event) => {
-  if (isTextInput(event.target)) {
-    currentTextInput = event.target;
-    lastFocusedInput = event.target;
-    showFloatingButton();
-    console.log('[CONTENT] Text input focused:', event.target.tagName.toLowerCase());
+(function() {
+  'use strict';
+  
+  // Prevent duplicate loading
+  if (window.promptifyLoaded) {
+    return;
   }
-});
+  
+  window.promptifyLoaded = true;
+  
+  // Verify extension context is valid
+  let extensionActive = true;
+  
+  // Monitor extension context validity
+  function checkExtensionContext() {
+    try {
+      return chrome.runtime && chrome.runtime.id;
+    } catch (e) {
+      return false;
+    }
+  }
 
-// Listen for focus out
-document.addEventListener('focusout', (event) => {
-  if (isTextInput(event.target)) {
-    setTimeout(() => {
-      if (!document.activeElement || !isTextInput(document.activeElement)) {
-        currentTextInput = null;
-        hideFloatingButton();
-        console.log('[CONTENT] Text input focus lost');
+  let floatingButton = null;
+  let currentTextInput = null;
+  let lastFocusedInput = null;
+  let isInitialized = false;
+
+  // Wait for DOM to be ready
+  function initializePromptify() {
+    if (isInitialized) return;
+    
+    try {
+      // Add event listeners - passive to not block Chrome's internal systems
+      document.addEventListener('focusin', handleFocusIn, { passive: true, capture: false });
+      document.addEventListener('focusout', handleFocusOut, { passive: true, capture: false });
+      
+      isInitialized = true;
+    } catch (error) {
+      console.error('[PROMPTIFY] Initialization error:', error);
+    }
+  }
+
+  // Handle focus in - use requestAnimationFrame to avoid blocking Chrome Aura
+  function handleFocusIn(event) {
+    try {
+      if (isTextInput(event.target)) {
+        currentTextInput = event.target;
+        lastFocusedInput = event.target;
+        // Defer to next frame to let Chrome's systems settle
+        requestAnimationFrame(() => {
+          showFloatingButton();
+        });
       }
-    }, 200);
+    } catch (error) {
+      console.error('Focus in error:', error);
+    }
   }
-});
+
+  // Handle focus out with error protection
+  function handleFocusOut(event) {
+    try {
+      if (isTextInput(event.target)) {
+        setTimeout(() => {
+          if (!document.activeElement || !isTextInput(document.activeElement)) {
+            currentTextInput = null;
+            hideFloatingButton();
+          }
+        }, 100);
+      }
+    } catch (error) {
+      console.error('Focus out error:', error);
+    }
+  }
+
+  // Update button position on scroll and resize
+  let repositionTimeout;
+  function scheduleReposition() {
+    clearTimeout(repositionTimeout);
+    repositionTimeout = setTimeout(() => {
+      if (currentTextInput && floatingButton && floatingButton.style.display === 'block') {
+        positionButtonNearInput(currentTextInput);
+      }
+    }, 100);
+  }
+
+  window.addEventListener('scroll', scheduleReposition, { passive: true });
+  window.addEventListener('resize', scheduleReposition, { passive: true });
 
 function isTextInput(element) {
   if (!element) return false;
@@ -49,12 +109,30 @@ function showFloatingButton() {
     createFloatingButton();
   }
   
-  if (!document.body.contains(floatingButton)) {
+  if (document.body && !document.body.contains(floatingButton)) {
     document.body.appendChild(floatingButton);
-    console.log('[CONTENT] Floating button displayed');
   }
   
-  floatingButton.style.display = 'block';
+  if (floatingButton && currentTextInput) {
+    floatingButton.style.display = 'block';
+    positionButtonNearInput(currentTextInput);
+  }
+}
+
+// Position button near the focused input
+function positionButtonNearInput(inputElement) {
+  if (!inputElement || !floatingButton) return;
+  
+  const rect = inputElement.getBoundingClientRect();
+  const button = floatingButton.firstElementChild;
+  
+  if (button) {
+    // Position at top-right corner of the input field
+    button.style.position = 'fixed';
+    button.style.top = `${rect.top + window.scrollY}px`;
+    button.style.left = `${rect.right + window.scrollX - 70}px`; // 10px from right edge of input
+    button.style.zIndex = '10000';
+  }
 }
 
 // Hide floating button
@@ -118,65 +196,314 @@ function createFloatingButton() {
   return floatingButton;
 }
 
+// Create custom modal for input
+function createPromptModal(currentText) {
+  const modal = document.createElement('div');
+  modal.id = 'promptify-modal';
+  modal.innerHTML = `
+    <div style="
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 99999;
+      backdrop-filter: blur(5px);
+    ">
+      <div style="
+        background: white;
+        border-radius: 16px;
+        padding: 32px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      ">
+        <h2 style="
+          margin: 0 0 16px 0;
+          font-size: 24px;
+          color: #667eea;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        ">✨ Promptify AI</h2>
+        <p style="
+          margin: 0 0 16px 0;
+          color: #666;
+          font-size: 14px;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        ">Current text: <strong>${currentText || '(empty)'}</strong></p>
+        <textarea id="promptify-input" placeholder="Enter your prompt (leave empty to enhance current text)" style="
+          width: 100%;
+          min-height: 100px;
+          padding: 12px;
+          border: 2px solid #e0e0e0;
+          border-radius: 8px;
+          font-size: 14px;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          resize: vertical;
+          box-sizing: border-box;
+        "></textarea>
+        <div id="promptify-status" style="
+          margin: 12px 0;
+          padding: 12px;
+          border-radius: 8px;
+          font-size: 14px;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          display: none;
+          text-align: center;
+        "></div>
+        <div style="
+          display: flex;
+          gap: 12px;
+          margin-top: 16px;
+        ">
+          <button id="promptify-cancel" style="
+            flex: 1;
+            padding: 12px 24px;
+            border: 2px solid #e0e0e0;
+            background: white;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          ">Cancel</button>
+          <button id="promptify-submit" style="
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          ">Generate ✨</button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Focus textarea
+  const textarea = modal.querySelector('#promptify-input');
+  textarea.focus();
+  
+  return new Promise((resolve) => {
+    const submitBtn = modal.querySelector('#promptify-submit');
+    const cancelBtn = modal.querySelector('#promptify-cancel');
+    
+    submitBtn.addEventListener('click', () => {
+      // Don't remove modal on submit - let the async function handle it
+      resolve(textarea.value.trim());
+    });
+    
+    cancelBtn.addEventListener('click', () => {
+      modal.remove();
+      resolve(null);
+    });
+    
+    // Submit on Enter (with Ctrl/Cmd)
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        // Don't remove modal on submit - let the async function handle it
+        resolve(textarea.value.trim());
+      }
+      // Cancel on Escape
+      if (e.key === 'Escape') {
+        modal.remove();
+        resolve(null);
+      }
+    });
+  });
+}
+
+// Show status in modal
+function showModalStatus(message, type = 'info') {
+  const modal = document.getElementById('promptify-modal');
+  if (!modal) return;
+  
+  const statusDiv = modal.querySelector('#promptify-status');
+  const submitBtn = modal.querySelector('#promptify-submit');
+  
+  statusDiv.style.display = 'block';
+  statusDiv.textContent = message;
+  
+  if (type === 'loading') {
+    statusDiv.style.background = '#e3f2fd';
+    statusDiv.style.color = '#1976d2';
+    submitBtn.disabled = true;
+    submitBtn.style.opacity = '0.6';
+    submitBtn.style.cursor = 'not-allowed';
+  } else if (type === 'error') {
+    statusDiv.style.background = '#ffebee';
+    statusDiv.style.color = '#c62828';
+    submitBtn.disabled = false;
+    submitBtn.style.opacity = '1';
+    submitBtn.style.cursor = 'pointer';
+  } else if (type === 'success') {
+    statusDiv.style.background = '#e8f5e9';
+    statusDiv.style.color = '#2e7d32';
+  }
+}
+
+// Close modal
+function closeModal() {
+  const modal = document.getElementById('promptify-modal');
+  if (modal) {
+    modal.remove();
+  }
+}
+
 // Open Promptify interface
 async function openPromptifyInterface() {
-  // Get current text in the input (if any)
-  let currentText = '';
-  if (currentTextInput) {
-    currentText = getCurrentInputText(currentTextInput);
+  // Verify extension is still connected
+  if (!checkExtensionContext()) {
+    console.error('Extension context lost, reloading page...');
+    window.location.reload();
+    return;
   }
   
-  const prompt = window.prompt(`Promptify - Enhance your text with AI:\n\nCurrent text: "${currentText}"\n\nEnter your prompt (leave empty to enhance current text):`);
+  console.info('Get current text in the input (if any)');
+  
+  // Save the target input BEFORE opening modal (modal will steal focus)
+  const targetInput = currentTextInput || lastFocusedInput;
+  
+  if (!targetInput) {
+    alert('Please focus on a text input first');
+    return;
+  }
+  
+  console.log('Target input saved:', targetInput);
+  
+  let currentText = '';
+  if (targetInput) {
+    currentText = getCurrentInputText(targetInput);
+  }
+  
+  const prompt = await createPromptModal(currentText);
   
   if (prompt === null) return; // User cancelled
   
-  const finalPrompt = prompt.trim() || currentText || 'Help me write something good';
+  const finalPrompt = prompt || currentText || 'Help me write something good';
   
   if (!finalPrompt) {
-    alert('Please enter some text or prompt');
+    showModalStatus('Please enter some text or prompt', 'error');
     return;
   }
   
   try {
-    // Show loading state
+    console.info('Querying Promptify AI...');
+    const startTime = Date.now();
+    showModalStatus('⏳ Connecting to Ollama... (0s)', 'loading');
+    
     const button = document.getElementById('promptify-float-btn');
+    let originalContent;
     if (button) {
-      const originalContent = button.innerHTML;
+      originalContent = button.innerHTML;
       button.innerHTML = '⏳';
-      button.style.animation = 'spin 1s linear infinite';
-      
-      setTimeout(() => {
-        button.innerHTML = originalContent;
-        button.style.animation = 'none';
-      }, 10000); // Reset after 10 seconds max
+      button.style.animation = 'promptify-spin 1s linear infinite';
     }
     
-    // Send message to background script
-    const response = await chrome.runtime.sendMessage({
-      type: 'OLLAMA_QUERY',
-      payload: {
-        prompt: finalPrompt,
-        model: 'llama3.2' // Could load from storage
+    // Show progress updates with timer
+    let progressInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      const statusDiv = document.querySelector('#promptify-status');
+      if (statusDiv && statusDiv.style.display !== 'none') {
+        const messages = [
+          `⏳ Connecting to Ollama... (${elapsed}s)`,
+          `⏳ Processing your prompt... (${elapsed}s)`,
+          `⏳ Generating AI response... (${elapsed}s)`,
+          `⏳ Still working... (${elapsed}s)`
+        ];
+        let msgIndex = Math.min(Math.floor(elapsed / 3), messages.length - 1);
+        statusDiv.textContent = messages[msgIndex];
       }
-    });
+    }, 1000);
     
-    if (response.ok && currentTextInput) {
-      // Insert enhanced response into current text input
-      insertTextIntoInput(currentTextInput, response.text);
+    // Send message to background script with retry logic
+    let response;
+    try {
+      console.log('Sending message to background script...');
       
-      // Show success animation
+      // Wake up service worker by checking if it's alive
+      if (!chrome.runtime?.id) {
+        throw new Error('Extension context is invalid');
+      }
+      
+      response = await chrome.runtime.sendMessage({
+        type: 'OLLAMA_QUERY',
+        payload: {
+          prompt: finalPrompt,
+          model: 'llama3.2' // Could load from storage
+        }
+      });
+      
+      console.log('Received response from background:', response);
+      
+      if (!response) {
+        throw new Error('No response received from background script');
+      }
+    } catch (err) {
+      clearInterval(progressInterval);
+      // If extension context is invalidated, try to reload and retry
+      if (err.message && err.message.includes('Extension context invalidated')) {
+        console.warn('Extension context invalidated, reloading...');
+        closeModal();
+        window.location.reload();
+        return;
+      }
+      throw err;
+    } finally {
+      clearInterval(progressInterval);
+    }
+    
+    if (response && response.ok && targetInput) {
+      console.log('Success! Inserting text into:', targetInput);
+      console.log('Response text:', response.text);
+      showModalStatus('✅ Success! Inserting text...', 'success');
+      
+      // Insert enhanced response into saved target input
+      insertTextIntoInput(targetInput, response.text);
+      
+      // Show success animation on button
       if (button) {
         button.innerHTML = '✅';
+        button.style.animation = 'none';
         setTimeout(() => {
           button.innerHTML = '✨ AI';
         }, 2000);
       }
+      
+      // Close modal after short delay
+      setTimeout(() => {
+        closeModal();
+      }, 1000);
     } else {
-      alert('Error: ' + (response.error || 'Unknown error'));
+      console.error('Failed to insert text. Response:', response, 'targetInput:', targetInput);
+      const errorMsg = !response ? 'No response' : 
+                       !response.ok ? (response.error || 'Unknown error') :
+                       !targetInput ? 'No text input found' : 'Unknown error';
+      showModalStatus('Error: ' + errorMsg, 'error');
+      if (button) {
+        button.innerHTML = originalContent || '✨ AI';
+        button.style.animation = 'none';
+      }
     }
   } catch (error) {
     console.error('Error querying Ollama:', error);
-    alert('Failed to query Promptify: ' + error.message);
+    showModalStatus('Failed: ' + error.message, 'error');
+    const button = document.getElementById('promptify-float-btn');
+    if (button) {
+      button.innerHTML = '✨ AI';
+      button.style.animation = 'none';
+    }
   }
 }
 
@@ -190,50 +517,58 @@ function getCurrentInputText(element) {
   return '';
 }
 
-// Insert text into input
+// Insert text into input (replaces existing content)
 function insertTextIntoInput(element, text) {
-  if (!element || !text) return;
+  console.log('insertTextIntoInput called with:', { element, text: text?.substring(0, 50) + '...' });
+  
+  if (!element || !text) {
+    console.warn('Missing element or text:', { element, text });
+    return;
+  }
   
   if (element.tagName.toLowerCase() === 'textarea' || 
       (element.tagName.toLowerCase() === 'input' && element.type !== 'file')) {
     
-    // For input/textarea elements
-    const start = element.selectionStart || element.value.length;
-    const end = element.selectionEnd || element.value.length;
-    const currentValue = element.value || '';
+    console.log('Replacing content in textarea/input');
+    // For input/textarea elements - replace all content
+    element.value = text;
     
-    // Insert text at cursor position (or append if no selection)
-    const newValue = currentValue.substring(0, start) + text + currentValue.substring(end);
-    element.value = newValue;
+    console.log('New value set, length:', text.length);
     
-    // Position cursor after inserted text
-    const newPosition = start + text.length;
-    element.setSelectionRange(newPosition, newPosition);
+    // Position cursor at the end
+    element.setSelectionRange(text.length, text.length);
+    
+    // Focus the element
+    element.focus();
     
     // Trigger events to notify the page of the change
     element.dispatchEvent(new Event('input', { bubbles: true }));
     element.dispatchEvent(new Event('change', { bubbles: true }));
     
+    console.log('Text replaced successfully');
+    
   } else if (element.contentEditable === 'true') {
-    // For contenteditable elements
+    console.log('Replacing content in contenteditable');
+    // For contenteditable elements - replace all content
     element.focus();
+    
+    // Select all content and replace
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection.removeAllRanges();
+    selection.addRange(range);
     
     // Use execCommand for better compatibility
     if (document.execCommand) {
       document.execCommand('insertText', false, text);
     } else {
-      // Fallback for newer browsers
-      const selection = window.getSelection();
-      const range = selection.getRangeAt(0);
-      range.deleteContents();
-      range.insertNode(document.createTextNode(text));
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
+      // Fallback - clear and insert
+      element.textContent = text;
     }
   }
   
-  console.log('📝 Text inserted into input:', element);
+  console.log('📝 Text replaced in input:', element);
 }
 
 // Check if element is a text input
@@ -365,12 +700,34 @@ function findVisibleTextInput() {
   return null;
 }
 
-// Add spin animation
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+  // Add spin animation style
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes promptify-spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  `;
+  
+  if (document.head) {
+    document.head.appendChild(style);
+  } else {
+    document.addEventListener('DOMContentLoaded', () => {
+      if (document.head) {
+        document.head.appendChild(style);
+      }
+    });
   }
-`;
-document.head.appendChild(style);
+
+  // Initialize when DOM is ready - delayed to not interfere with Chrome Aura
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      // Give Chrome's systems time to initialize first
+      setTimeout(initializePromptify, 1500);
+    });
+  } else {
+    // DOM already ready, still delay to avoid Aura conflicts
+    setTimeout(initializePromptify, 1500);
+  }
+
+})(); // End of IIFE
